@@ -1,5 +1,9 @@
 " Author: Radu Dineiu <radu.dineiu@gmail.com>
-" Version: 0.1
+" Version: 0.2
+" 
+" Changelog:
+"   0.2 - added <Up> and <Down> bindings
+"       - added python support
 
 " Settings
 set tabstop=4 shiftwidth=4 autoindent noexpandtab
@@ -233,6 +237,13 @@ function! InsertBrace()
 		if &ft == 'vim'
 			let end_word = 'end' . substitute(GetFirstWord(), 'else', '', '')
 			return "\<End>\<CR>" . end_word . "\<Up>\<End>\<CR>\<Tab>"
+		elseif &ft == 'python'
+			let next_line = getline(line('.') + 1)
+			if next_line =~ '^\s*pass\s*$'
+				return "\<Down>\<End>\<C-w>"
+			else
+				return "\<End>\<CR>\<Tab>"
+			endif
 		else
 			let line = getline('.')
 			if &ft == 'php'
@@ -482,6 +493,23 @@ function! ExpandTemplate(ignore_quote)
 endfunction
 inoremap <silent> <Space> <C-R>=ExpandTemplate(0)<CR>
 
+" <Up> and <Down> in word wrapping mode
+nnoremap <Down> gj
+nnoremap <Up> gk
+function! MoveCursor(cmd)
+	if a:cmd == 'down'
+		if pumvisible() | return "\<Down>" | endif
+		execute 'normal! gj'
+		return ''
+	else
+		if pumvisible() | return "\<Up>" | endif
+		execute 'normal! gk'
+		return ''
+	endif
+endfunction
+inoremap <silent> <Down> <C-R>=MoveCursor('down')<CR>
+inoremap <silent> <Up> <C-R>=MoveCursor('up')<CR>
+
 " NERDTree
 nnoremap <silent> <C-Q> :NERDTreeToggle<CR>
 inoremap <silent> <C-Q> <C-O>:NERDTreeToggle<CR>
@@ -530,6 +558,13 @@ let g:template{'javascript'}{'t'} = "this."
 " Vim templates
 let g:template{'vim'}{'f'} = "function! ()\<CR>endfunction\<Up>\<End>\<Left>\<Left>"
 let g:template{'vim'}{'r'} = "return "
+
+" Python
+let g:template{'python'}{'f'} = "def ():\<CR>\<Tab>pass\<Up>\<End>" . repeat("\<Left>", 3)
+let g:template{'python'}{'fi'} = "def __init__(self):\<CR>\<Tab>pass\<Up>\<End>" . repeat("\<Left>", 2)
+let g:template{'python'}{'cl'} = "class ():\<CR>\<Tab>pass\<Up>\<End>" . repeat("\<Left>", 3)
+let g:template{'python'}{'p'} = 'pass'
+let g:template{'python'}{'s'} = 'self.'
 
 " General templates
 let g:template{'_'}{'f'} = "function ()\<CR>{\<CR>}\<Up>\<CR>\<Tab>\<Up>\<Up>\<End>\<Left>\<Left>"
