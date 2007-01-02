@@ -1,9 +1,13 @@
 " Author: Radu Dineiu <radu.dineiu@gmail.com>
-" Version: 0.2
+" Version: 0.3
 " 
 " Changelog:
 "   0.2 - added <Up> and <Down> bindings
 "       - added python support
+"   0.3 - tweaked with the popup menu
+"       - { will now insert { } and place the cursor inside, if in php mode
+"       - { does not insert a matching } if the line is empty
+"       - no HTML end tags will appear on the second line anymore
 
 " Settings
 set tabstop=4 shiftwidth=4 autoindent noexpandtab
@@ -212,6 +216,9 @@ inoremap <S-CR> <C-o>O
 inoremap <C-S-CR> <C-R>=JumpNext(1)<CR>
 
 function! JumpTab()
+	if pumvisible()
+		return "\<C-y>"
+	endif
 	let b = GetCharBefore()
 	if b == '{' || b == '(' || b == '['
 		if IsBlockStart(0)
@@ -325,7 +332,14 @@ function! CheckOpenParen(char)
 		endif
 		if a:char == '(' | let repl .= ')'
 		elseif a:char == '[' | let repl .= ']'
-		elseif a:char == '{' | let repl .= '}'
+		elseif a:char == '{'
+			if getline('.') =~ '^\s*$'
+				return '{'
+			endif
+			if &ft == 'php'
+				return repl . "  }\<Left>\<Left>"
+			endif
+			let repl .= '}'
 		endif
 		return repl . "\<Left>"
 	endif
@@ -461,9 +475,7 @@ function! ExpandTag(char)
 		let cleft = repeat("\<Left>", len(cword) + 4)
 		let retval = ""
 		let close_tag = "></" . cword . ">" . cleft
-		if cword == 'div' || cword == 'fieldset' || cword == 'legend' || cword == 'table' || cword == 'thead' || cword == 'tbody'
-			let retval .= close_tag . "\<Right>\<CR>\<Up>\<End>\<Left>"
-		elseif cword == 'input' || cword == 'label' || cword == 'br'
+		if cword == 'input' || cword == 'label' || cword == 'br'
 			let retval .= ">\<Left>"
 		else
 			let retval .= close_tag
