@@ -1,18 +1,29 @@
 " Author: Radu Dineiu <radu.dineiu@gmail.com>
-" Version: 0.3
+" Version: 0.4
 " 
 " Changelog:
-"   0.2 - added <Up> and <Down> bindings
-"       - added python support
-"   0.3 - tweaked with the popup menu
+"   0.4 - { } is back to {}
+"       - closing apostrophes are only appended in supported file types
+"       - >> indents only in supported file types
+"       - if in PHP mode, >> only indents if the last > is not following a ?
+"       - added more no-closing HTML tags
+"       - automatically closing tags within tags now works
+"       - M-. only inserts a PHP template in PHP mode now
+"       - got template expansion to work inside HTML strings
+"       - got PHP templates to behave differently when in short tag mode
+"       - PHP template e = echo
+"       - PHP template ex = extends
+"       - M-{ in visual mode encloses the selection in a { } block
+"       - M-/ in visual mode comments the selection
+"   0.3 - tweaks with the popup menu
 "       - { will now insert { } and place the cursor inside, if in php mode
 "       - { does not insert a matching } if the line is empty
 "       - no HTML end tags will appear on the second line anymore
+"   0.2 - added <Up> and <Down> bindings
+"       - added python support
 
 " Settings
 set tabstop=4 shiftwidth=4 autoindent noexpandtab
-set guioptions=t
-set foldmethod=indent foldlevel=1000
 set backspace=indent,eol,start
 set backupext=.bak
 if has('win32')
@@ -22,8 +33,6 @@ else
 	set backupdir=/tmp directory=/tmp
 	set tags=/tmp/.vimtags
 endif
-set novisualbell
-set noerrorbells 
 set hlsearch history=10000 incsearch
 set ignorecase smartcase
 set undolevels=10000
@@ -58,12 +67,16 @@ inoremap <silent> <Home> <C-o>^
 nnoremap <silent> <Home> ^
 
 " Utility functions
+function! GetSynUnder()
+	return synIDattr(synID(line('.'), col('.'), 1), 'name')
+endfunction
+
 function! GetCharUnder()
 	return strpart(getline('.'), col('.') - 1, 1)
 endfunction
 
-function! GetCharBefore()
-	return strpart(getline('.'), col('.') - 2, 1)
+function! GetCharBefore(offset)
+	return strpart(getline('.'), col('.') - (a:offset + 1), 1)
 endfunction
 
 function! GetCharAfter()
@@ -76,6 +89,10 @@ endfunction
 
 function! GetStringBeforeCursor(offset)
 	return strpart(getline('.'), 0, col('.') - a:offset)
+endfunction
+
+function! GetStringAfterCursor()
+	return strpart(getline('.'), col('.'))
 endfunction
 
 function! GetWordBeforeCursor(keep_spaces)
@@ -131,14 +148,38 @@ function! InsideQuote(char)
 endfunction
 
 " PHP script template shortcut
-inoremap <silent> <M-.> <?php<CR>?><Up><End><CR><CR><CR><Up><Tab>
+function! InsertPHP()
+	if &ft == 'php'
+		if GetSynUnder() =~ '^php'
+			call search('?>')
+			call cursor(line('.'), col('.') + 2)
+			if GetCharUnder() == '"'
+				return "\<Right>"
+			endif
+			return ''
+		else
+			return "<?php\<CR>?>\<Up>\<End>\<CR>\<CR>\<CR>\<Up>\<Tab>"
+		endif
+	endif
+	return '.'
+endfunction
+inoremap <silent> <M-.> <C-R>=InsertPHP()<CR>
 
 " Insert ending characters
 function! InsertAtEnd(char)
-	if getline('.') =~ a:char . '$'
+	let line = getline('.')
+	if line =~ a:char . '$'
 		return "\<Right>\<Left>"
 	else
-		return "\<C-o>mk\<End>i" . a:char . "\<C-o>`ki"
+		let extra = ''
+		if AtEnd()
+			let extra = "\<Right>"
+		endif
+		if line =~ ';\s*$'
+			return "\<C-o>mk\<End>\<Left>i" . a:char . "\<C-o>`ki" . extra
+		else
+			return "\<C-o>mk\<End>i" . a:char . "\<C-o>`ki" . extra
+		endif
 	endif
 endfunction
 inoremap <silent> <M-;> <C-R>=InsertAtEnd(';')<CR>
@@ -219,7 +260,7 @@ function! JumpTab()
 	if pumvisible()
 		return "\<C-y>"
 	endif
-	let b = GetCharBefore()
+	let b = GetCharBefore(1)
 	if b == '{' || b == '(' || b == '['
 		if IsBlockStart(0)
 			let line = getline(line('.') + 1)
@@ -260,7 +301,17 @@ function! InsertBrace()
 					if line !~ ':\s*?>$'
 						let retval = "\<End>\<Left>\<Left>\<Left>:"
 					endif
-					return retval . "\<End>\<CR><? " . end_word . "; ?>\<Up>\<End>\<CR>\<Tab>"
+					let end_word_match = '\<' . end_word . '\>'
+					let next_line = getline(line('.') + 1)
+					if next_line =~ end_word_match || getline(line('.') + 2) =~ end_word_match
+						if next_line =~ '^\s*$'
+							return retval . "\<Down>"
+						else
+							return retval . "\<End>\<CR>\<Tab>"
+						endif
+					else
+						return retval . "\<End>\<CR><? " . end_word . "; ?>\<Up>\<End>\<CR>\<Tab>"
+					endif
 				elseif line =~ '^\s*case\s\+'
 					let retval = ''
 					if line !~ ':\s*$'
@@ -299,7 +350,7 @@ endfunction
 inoremap <silent> = <C-R>=CheckAssign()<CR>
 
 " Parens
-function! CheckCloseParen(char)
+function! CheckClose(char)
 	if GetCharUnder() != a:char
 		return a:char
 	else
@@ -310,14 +361,14 @@ function! CheckCloseParen(char)
 		endif
 	endif
 endfunction
-inoremap <silent> ) <C-R>=CheckCloseParen(')')<CR>
-inoremap <silent> ] <C-R>=CheckCloseParen(']')<CR>
-inoremap <silent> } <C-R>=CheckCloseParen('}')<CR>
+inoremap <silent> ) <C-R>=CheckClose(')')<CR>
+inoremap <silent> ] <C-R>=CheckClose(']')<CR>
+inoremap <silent> } <C-R>=CheckClose('}')<CR>
 " ; and , can also be detected here
-inoremap <silent> ; <C-R>=CheckCloseParen(';')<CR>
-inoremap <silent> , <C-R>=CheckCloseParen(',')<CR>
+inoremap <silent> ; <C-R>=CheckClose(';')<CR>
+inoremap <silent> , <C-R>=CheckClose(',')<CR>
 
-function! CheckOpenParen(char)
+function! CheckOpen(char)
 	if GetCharUnder() == a:char
 		return "\<Right>"
 	else
@@ -336,17 +387,14 @@ function! CheckOpenParen(char)
 			if getline('.') =~ '^\s*$'
 				return '{'
 			endif
-			if &ft == 'php'
-				return repl . "  }\<Left>\<Left>"
-			endif
 			let repl .= '}'
 		endif
 		return repl . "\<Left>"
 	endif
 endfunction
-inoremap <silent> ( <C-R>=CheckOpenParen('(')<CR>
-inoremap <silent> [ <C-R>=CheckOpenParen('[')<CR>
-inoremap <silent> { <C-R>=CheckOpenParen('{')<CR>
+inoremap <silent> ( <C-R>=CheckOpen('(')<CR>
+inoremap <silent> [ <C-R>=CheckOpen('[')<CR>
+inoremap <silent> { <C-R>=CheckOpen('{')<CR>
 
 " Quotes
 let g:last_for = ''
@@ -365,7 +413,9 @@ function! CheckOpenQuote(char)
 		elseif a:char == "'" && InsideQuote('"')
 			return "'"
 		else
-			return a:char . a:char . "\<Left>"
+			if (a:char == "'" && (&ft == 'php' || &ft == 'javascript' || &ft == 'python' || &ft == 'vim')) || a:char == '"'
+				return a:char . a:char . "\<Left>"
+			endif
 		endif
 	endif
 	return a:char
@@ -374,10 +424,10 @@ inoremap <silent> " <C-R>=CheckOpenQuote('"')<CR>
 inoremap <silent> ' <C-R>=CheckOpenQuote("'")<CR>
 
 function! AppendQuote(char)
-	if &ft == 'php'
-		return a:char . ' .  . ' . a:char . "\<Left>\<Left>\<Left>\<Left>"
+	if &ft == 'php' || &ft == 'vim'
+		return a:char . ' .  . ' . a:char . repeat("\<Left>", 4)
 	elseif &ft == 'javascript'
-		return a:char . ' +  + ' . a:char . "\<Left>\<Left>\<Left>\<Left>"
+		return a:char . ' +  + ' . a:char . repeat("\<Left>", 4)
 	endif
 	return a:char
 endfunction
@@ -387,7 +437,7 @@ inoremap <silent> <M-"> <C-R>=AppendQuote('"')<CR>
 " Delete / Backspace
 " use <C-Del> / <C-BS> to force normal behaviour
 function! CheckDelete(dir)
-	let b = GetCharBefore()
+	let b = GetCharBefore(1)
 	let u = GetCharUnder()
 	if (b == '(' && u == ')') || (b == '[' && u == ']') || (b == '{' && u == '}') || (b == '"' && u == '"') || (b == "'" && u == "'")
 		return "\<BS>\<Del>"
@@ -443,9 +493,13 @@ function! InsertTab(tab)
 		return "\<Tab>"
 	else
 		if a:tab == 'n'
-			return "\<C-N>"
+			if pumvisible()
+				return "\<C-n>"
+			else
+				return "\<C-p>"
+			endif
 		elseif a:tab == 'o'
-			return "\<C-X>\<C-O>"
+			return "\<C-x>\<C-o>"
 		endif
 	endif
 endfunction
@@ -462,38 +516,8 @@ let php_folding = 3
 let php_fold_arrays = 1
 
 " Template and tag expansion
-function! ExpandTag(char)
-	if a:char == '>'
-		if GetCharUnder() == '>'
-			return "\<Right>"
-		elseif GetCharBefore() == '>'
-			return "\<CR>\<CR>\<Up>\<Tab>"
-		endif
-	endif
-	if GetStringBeforeCursor(0) =~ '^\s*<\w\+' . a:char . '*$' && (&ft == 'php' || &ft == 'html')
-		let cword = GetWordBeforeCursor(0)
-		let cleft = repeat("\<Left>", len(cword) + 4)
-		let retval = ""
-		let close_tag = "></" . cword . ">" . cleft
-		if cword == 'input' || cword == 'label' || cword == 'br'
-			let retval .= ">\<Left>"
-		else
-			let retval .= close_tag
-		endif
-		if a:char == ' '
-			let retval = ' ' . retval
-		else
-			let retval .= "\<Right>"
-		endif
-		return retval
-	else
-		return a:char
-	endif
-endfunction
-inoremap <silent> > <C-R>=ExpandTag('>')<CR>
-
 function! ExpandTemplate(ignore_quote)
-	if a:ignore_quote || (!InsideQuote("'") && !InsideQuote('"'))
+	if a:ignore_quote || GetSynUnder() == 'htmlString' || (!InsideQuote("'") && !InsideQuote('"'))
 		let cword = GetExactWordBeforeCursor(1)
 		if exists('g:template' . &ft . cword)
 			return "\<C-W>" . g:template{&ft}{cword}
@@ -504,6 +528,38 @@ function! ExpandTemplate(ignore_quote)
 	return ExpandTag(' ')
 endfunction
 inoremap <silent> <Space> <C-R>=ExpandTemplate(0)<CR>
+
+function! ExpandTag(char)
+	if a:char == '>'
+		if GetCharUnder() == '>'
+			return "\<Right>"
+		elseif GetCharBefore(1) == '>' && (&ft == 'php' || &ft == 'html')
+			if &ft == 'php' && GetCharBefore(2) == '?'
+				return '>'
+			endif
+			return "\<CR>\<CR>\<Up>\<Tab>"
+		endif
+	endif
+	if GetStringBeforeCursor(0) =~ '^.*<\w\+\S*$' && (&ft == 'php' || &ft == 'html')
+		let cword = GetExactWordBeforeCursor(1)
+		let cleft = repeat("\<Left>", len(cword) + 4)
+		let retval = ''
+		let close_tag = '></' . cword . '>' . cleft
+		if cword == 'input' || cword == 'label' || cword == 'br' || cword == 'hr'
+			let retval .= ">\<Left>"
+		else
+			let retval .= close_tag
+		endif
+		if a:char == ' '
+			let retval = ' ' . retval
+		else
+			let retval .= "\<Right>"
+		endif
+		return retval
+	endif
+	return a:char
+endfunction
+inoremap <silent> > <C-R>=ExpandTag('>')<CR>
 
 " <Up> and <Down> in word wrapping mode
 nnoremap <Down> gj
@@ -522,13 +578,49 @@ endfunction
 inoremap <silent> <Down> <C-R>=MoveCursor('down')<CR>
 inoremap <silent> <Up> <C-R>=MoveCursor('up')<CR>
 
+" Visual mode functions
+function! Enclose(mode, indent)
+	if a:mode == '{'
+		let start = '{'
+		let end = '}'
+	elseif a:mode == '/'
+		let start = '/**'
+		let end = '/**/'
+	endif
+	let extra = ''
+	if a:indent
+		let extra = "\<BS>"
+	endif
+	call cursor(line("'<"), col("'<"))
+	execute "normal! O" . extra . start
+	call cursor(line("'>"), col("'>"))
+	execute "normal! o" . extra . end
+endfunction
+vnoremap <silent> <M-{> >gv:<C-u>call Enclose('{', 1)<CR>
+vnoremap <silent> <M-/> :<C-u>call Enclose('/', 0)<CR>
+
 " NERDTree
 nnoremap <silent> <C-Q> :NERDTreeToggle<CR>
 inoremap <silent> <C-Q> <C-O>:NERDTreeToggle<CR>
 
+" Template utility functions
+function! InsideShortPHP()
+	return GetStringBeforeCursor(0) =~ '^.*<?[^p]'
+endfunction
+
+function! InsertPHPBlock()
+	if InsideShortPHP()
+		let cword = substitute(GetStringBeforeCursor(0), '^.*\(\<\w\+\).*$', '\1', '')
+		return ":\<End>\<CR><? end" . cword . "; ?>\<Up>\<End>" . repeat("\<Left>", 4)
+	else
+		return "\<CR>{\<CR>}\<Up>\<CR>\<Tab>\<Up>\<Up>\<End>"
+	endif
+endfunction
+
 " PHP templates
 let g:template{'php'}{'cl'} = "class \<CR>{\<CR>}\<Up>\<CR>\<Tab>\<Up>\<Up>\<End>"
-let g:template{'php'}{'e'} = "extends "
+let g:template{'php'}{'e'} = "echo "
+let g:template{'php'}{'ex'} = "extends "
 let g:template{'php'}{'st'} = "static "
 let g:template{'php'}{'pb'} = "public "
 let g:template{'php'}{'pv'} = "private "
@@ -537,9 +629,9 @@ let g:template{'php'}{'n'} = "new ()\<Left>\<Left>"
 let g:template{'php'}{'t'} = "$this->"
 let g:template{'php'}{'v'} = "var "
 let g:template{'php'}{'gl'} = "global $;\<Left>"
-let g:template{'php'}{'fe'} = "foreach ()\<CR>{\<CR>}\<Up>\<CR>\<Tab>\<Up>\<Up>\<End>\<Left>"
-let g:template{'php'}{'wh'} = "while ()\<CR>{\<CR>}\<Up>\<CR>\<Tab>\<Up>\<Up>\<End>\<Left>"
-let g:template{'php'}{'sw'} = "switch ()\<CR>{\<CR>}\<Up>\<CR>\<Tab>\<Up>\<Up>\<End>\<Left>"
+let g:template{'php'}{'fe'} = "foreach ()\<C-R>=InsertPHPBlock()\<CR>\<Left>"
+let g:template{'php'}{'wh'} = "while ()\<C-R>=InsertPHPBlock()\<CR>\<Left>"
+let g:template{'php'}{'sw'} = "switch ()\<C-R>=InsertPHPBlock()\<CR>\<Left>"
 let g:template{'php'}{'cs'} = "case :\<CR>\<Tab>break;\<Up>\<End>\<Left>"
 let g:template{'php'}{'csd'} = "default:\<CR>\<Tab>break;\<Up>\<End>\<CR>\<Tab>"
 let g:template{'php'}{'ar'} = "array()\<Left>"
@@ -564,7 +656,7 @@ let g:template{'php'}{'inp'} = "<input\<C-R>=InsertLastFor()\<CR> type=\"\">" . 
 let g:template{'php'}{'sel'} = "<select\<C-R>=InsertLastFor()\<CR> >\<CR></select>\<Up>\<End>\<Left>"
 
 " JavaScript templates
-let g:template{'javascript'}{'cl'} = "var  = new function()\<CR>{\<CR>\<CR>}\<Up>\<Tab>\<Up>\<Up>\<C-o>^\<Right>\<Right>\<Right>\<Right>"
+let g:template{'javascript'}{'cl'} = "var  = new function()\<CR>{\<CR>\<CR>}\<Up>\<Tab>\<Up>\<Up>\<C-o>^" . repeat("\<Right>", 4)
 let g:template{'javascript'}{'t'} = "this."
 
 " Vim templates
