@@ -1,7 +1,8 @@
 " Author: Radu Dineiu <radu.dineiu@gmail.com>
-" Version: 0.4
+" Version: 0.5
 " 
 " Changelog:
+"   0.5 - fixed the tag closing bug
 "   0.4 - { } is back to {}
 "       - closing apostrophes are only appended in supported file types
 "       - >> indents only in supported file types
@@ -540,22 +541,27 @@ function! ExpandTag(char)
 			return "\<CR>\<CR>\<Up>\<Tab>"
 		endif
 	endif
-	if GetStringBeforeCursor(0) =~ '^.*<\w\+\S*$' && (&ft == 'php' || &ft == 'html')
+	let sbefore = GetStringBeforeCursor(0)
+	if sbefore =~ '^.*<\w\+\S*$' && (&ft == 'php' || &ft == 'html')
 		let cword = GetExactWordBeforeCursor(1)
-		let cleft = repeat("\<Left>", len(cword) + 4)
-		let retval = ''
-		let close_tag = '></' . cword . '>' . cleft
-		if cword == 'input' || cword == 'label' || cword == 'br' || cword == 'hr'
-			let retval .= ">\<Left>"
-		else
-			let retval .= close_tag
+		let sbefore1 = strpart(sbefore, 0, strlen(sbefore) - 1)
+		if cword !~ '>' && CountOccurances(sbefore1, '<') > CountOccurances(sbefore1, '>')
+			let cleft = repeat("\<Left>", len(cword) + 4)
+			let retval = ''
+			let close_tag = '></' . cword . '>' . cleft
+			if cword == 'input' || cword == 'label' || cword == 'br' || cword == 'hr'
+				let retval .= ">\<Left>"
+			else
+				let retval .= close_tag
+			endif
+			if a:char == ' '
+				let retval = ' ' . retval
+			else
+				let retval .= "\<Right>"
+			endif
+			return retval
 		endif
-		if a:char == ' '
-			let retval = ' ' . retval
-		else
-			let retval .= "\<Right>"
-		endif
-		return retval
+		return a:char
 	endif
 	return a:char
 endfunction
