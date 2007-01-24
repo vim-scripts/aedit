@@ -1,7 +1,8 @@
 " Author: Radu Dineiu <radu.dineiu@gmail.com>
-" Version: 0.5
+" Version: 0.6
 " 
 " Changelog:
+"   0.6 - fixed another tag closing bug
 "   0.5 - fixed the tag closing bug
 "   0.4 - { } is back to {}
 "       - closing apostrophes are only appended in supported file types
@@ -542,6 +543,9 @@ function! ExpandTag(char)
 		endif
 	endif
 	let sbefore = GetStringBeforeCursor(0)
+	if GetCharUnder() == '>'
+		return a:char
+	endif
 	if sbefore =~ '^.*<\w\+\S*$' && (&ft == 'php' || &ft == 'html')
 		let cword = GetExactWordBeforeCursor(1)
 		let sbefore1 = strpart(sbefore, 0, strlen(sbefore) - 1)
