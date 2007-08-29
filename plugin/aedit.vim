@@ -1,28 +1,7 @@
 " Author: Radu Dineiu <radu.dineiu@gmail.com>
-" Version: 0.6
-" 
-" Changelog:
-"   0.6 - fixed another tag closing bug
-"   0.5 - fixed the tag closing bug
-"   0.4 - { } is back to {}
-"       - closing apostrophes are only appended in supported file types
-"       - >> indents only in supported file types
-"       - if in PHP mode, >> only indents if the last > is not following a ?
-"       - added more no-closing HTML tags
-"       - automatically closing tags within tags now works
-"       - M-. only inserts a PHP template in PHP mode now
-"       - got template expansion to work inside HTML strings
-"       - got PHP templates to behave differently when in short tag mode
-"       - PHP template e = echo
-"       - PHP template ex = extends
-"       - M-{ in visual mode encloses the selection in a { } block
-"       - M-/ in visual mode comments the selection
-"   0.3 - tweaks with the popup menu
-"       - { will now insert { } and place the cursor inside, if in php mode
-"       - { does not insert a matching } if the line is empty
-"       - no HTML end tags will appear on the second line anymore
-"   0.2 - added <Up> and <Down> bindings
-"       - added python support
+" Version: 0.8
+" URL: http://ld.yi.org/vim/aedit/aedit.vim
+" Changelog: http://ld.yi.org/vim/aedit/changelog.txt
 
 " Settings
 set tabstop=4 shiftwidth=4 autoindent noexpandtab
@@ -272,7 +251,12 @@ function! JumpTab()
 				return "\<Down>\<End>"
 			endif
 		else
-			return "\<CR>\<Tab>"
+			let next_line = getline(line('.') + 1)
+			if b == '{' && &ft == 'javascript'
+				return "\<CR>\<Up>\<End>\<CR>\<Tab>"
+			else
+				return "\<CR>\<Tab>"
+			endif
 		endif
 	endif
 	return "\<CR>"
@@ -280,22 +264,32 @@ endfunction
 inoremap <CR> <C-R>=JumpTab()<CR>
 
 " Braces
-function! InsertBrace()
+function! InsertBrace(mode)
 	if (&ft == 'vim' && IsFuncStart()) || (&ft != 'vim' && IsBlockStart(1))
 		return JumpNext(0)
 	else
+		let line = getline('.')
+		let next_line = getline(line('.') + 1)
+		if line =~ '{\s*$'
+			if next_line =~ '^$'
+				return "\<Down>\<Tab>"
+			elseif next_line =~ '^\s\+$'
+				return "\<Down>\<End>"
+			elseif next_line =~ '^}\s*$' || next_line =~ '^\s*};\?\s*$'
+				return "\<End>\<CR>\<Tab>"
+			endif
+		endif
+
 		if &ft == 'vim'
 			let end_word = 'end' . substitute(GetFirstWord(), 'else', '', '')
 			return "\<End>\<CR>" . end_word . "\<Up>\<End>\<CR>\<Tab>"
 		elseif &ft == 'python'
-			let next_line = getline(line('.') + 1)
 			if next_line =~ '^\s*pass\s*$'
 				return "\<Down>\<End>\<C-w>"
 			else
 				return "\<End>\<CR>\<Tab>"
 			endif
 		else
-			let line = getline('.')
 			if &ft == 'php'
 				if line =~ '^\s*<?.*?>$'
 					let end_word = 'end' . substitute(GetFirstWord(), 'else', '', '')
@@ -304,7 +298,6 @@ function! InsertBrace()
 						let retval = "\<End>\<Left>\<Left>\<Left>:"
 					endif
 					let end_word_match = '\<' . end_word . '\>'
-					let next_line = getline(line('.') + 1)
 					if next_line =~ end_word_match || getline(line('.') + 2) =~ end_word_match
 						if next_line =~ '^\s*$'
 							return retval . "\<Down>"
@@ -326,11 +319,16 @@ function! InsertBrace()
 					endif
 				endif
 			endif
-			return "\<End>\<CR>{\<CR>}\<Up>\<CR>\<Tab>"
+			if a:mode == '/'
+				return "\<End>\<CR>{\<CR>}\<Up>\<CR>\<Tab>"
+			elseif a:mode == '?'
+				return "\<End> {\<CR>}\<Up>\<End>\<CR>\<Tab>"
+			endif
 		endif
 	endif
 endfunction
-inoremap <silent> <M-/> <C-R>=InsertBrace()<CR>
+inoremap <silent> <M-/> <C-R>=InsertBrace('/')<CR>
+inoremap <silent> <M-?> <C-R>=InsertBrace('?')<CR>
 
 " Assignment
 function! CheckAssign()
@@ -386,10 +384,14 @@ function! CheckOpen(char)
 		if a:char == '(' | let repl .= ')'
 		elseif a:char == '[' | let repl .= ']'
 		elseif a:char == '{'
-			if getline('.') =~ '^\s*$'
+			let line = getline('.')
+			if line =~ '^\s*$'
 				return '{'
 			endif
 			let repl .= '}'
+			if &ft == 'javascript' && line =~ '=\s*;'
+				return repl . "\<End>\<BS>\<Left>"
+			endif
 		endif
 		return repl . "\<Left>"
 	endif
@@ -666,8 +668,34 @@ let g:template{'php'}{'inp'} = "<input\<C-R>=InsertLastFor()\<CR> type=\"\">" . 
 let g:template{'php'}{'sel'} = "<select\<C-R>=InsertLastFor()\<CR> >\<CR></select>\<Up>\<End>\<Left>"
 
 " JavaScript templates
+function! InsertJavaScriptFunction(mode)
+	let result = ''
+	let line = getline('.')
+	let anon = 1
+	if line =~ '^\s*$'
+		let anon = 0
+	elseif line =~ ';\s*$'
+		let result = "\<End>\<BS>"
+	endif
+	let result .= "function" . (anon ? '()' : ' ()')
+	if a:mode == 'ff'
+		let result .= " {\<CR>}\<Up>\<End>\<CR>\<Tab>\<Up>\<End>" . repeat("\<Left>", (anon ? 3 : 4))
+	else
+		let result .= "\<CR>{\<CR>}\<Up>\<End>\<CR>\<Tab>\<Up>\<Up>\<End>" . repeat("\<Left>", (anon ? 1 : 2))
+	endif
+	if anon && line !~ ';\s*$'
+		call setline('.', getline('.') . ';')
+	endif
+	return result
+endfunction
+let g:template{'javascript'}{'f'} = "\<C-R>=InsertJavaScriptFunction('f')\<CR>"
+let g:template{'javascript'}{'ff'} = "\<C-R>=InsertJavaScriptFunction('ff')\<CR>"
+let g:template{'javascript'}{'m'} = ": function()\<CR>{\<CR>}\<Up>\<CR>\<Tab>\<Up>\<Up>\<C-o>I"
+let g:template{'javascript'}{'mm'} = ": function() {\<CR>}\<Up>\<End>\<CR>\<Tab>\<Up>\<C-o>I"
 let g:template{'javascript'}{'cl'} = "var  = new function()\<CR>{\<CR>\<CR>}\<Up>\<Tab>\<Up>\<Up>\<C-o>^" . repeat("\<Right>", 4)
 let g:template{'javascript'}{'t'} = "this."
+let g:template{'javascript'}{'d'} = "document."
+let g:template{'javascript'}{'v'} = "var "
 
 " Vim templates
 let g:template{'vim'}{'f'} = "function! ()\<CR>endfunction\<Up>\<End>\<Left>\<Left>"
@@ -680,9 +708,20 @@ let g:template{'python'}{'cl'} = "class ():\<CR>\<Tab>pass\<Up>\<End>" . repeat(
 let g:template{'python'}{'p'} = 'pass'
 let g:template{'python'}{'s'} = 'self.'
 
+" JSP
+let g:template{'jsp'}{'inc'} = '<%@ include file="" %>' . repeat("\<Left>", 4)
+
 " General templates
 let g:template{'_'}{'f'} = "function ()\<CR>{\<CR>}\<Up>\<CR>\<Tab>\<Up>\<Up>\<End>\<Left>\<Left>"
+let g:template{'_'}{'ff'} = "function () {\<CR>}\<Up>\<End>" . repeat("\<Left>", 4)
 let g:template{'_'}{'r'} = "return ;\<Left>"
+
+" General HTML templates
 let g:template{'_'}{'thtml'} = '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">' . "\<CR><html>\<CR>\<Tab><head>\<CR>\<Tab><title></title>\<CR>" . '<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">' . "\<CR>\<BS></head>\<CR><body>\<CR></body>\<CR>\<BS></html>\<Up>\<Up>\<Up>\<Up>\<Up>\<End>\<Left>\<Left>\<Left>\<Left>\<Left>\<Left>\<Left>\<Left>"
+let g:template{'_'}{'tht'} = g:template{'_'}{'thtml'}
+
+let g:template{'_'}{'txhtml'} = '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">' . "\<CR><html>\<CR>\<Tab><head>\<CR>\<Tab><title></title>\<CR>" . '<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />' . "\<CR>\<BS></head>\<CR><body>\<CR></body>\<CR>\<BS></html>\<Up>\<Up>\<Up>\<Up>\<Up>\<End>\<Left>\<Left>\<Left>\<Left>\<Left>\<Left>\<Left>\<Left>"
+let g:template{'_'}{'thtt'} = g:template{'_'}{'txhtml'}
+
 let g:template{'_'}{'css'} = '<link rel="stylesheet" type="text/css" href="">' . repeat("\<Left>", 2)
 let g:template{'_'}{'js'} = '<script type="text/javascript" src=""></script>' . repeat("\<Left>", 11)
