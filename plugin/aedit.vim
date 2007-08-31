@@ -1,5 +1,5 @@
 " Author: Radu Dineiu <radu.dineiu@gmail.com>
-" Version: 0.9
+" Version: 0.91
 " URL: http://ld.yi.org/vim/aedit/aedit.vim
 " Changelog: http://ld.yi.org/vim/aedit/changelog.txt
 
@@ -568,8 +568,13 @@ function! ExpandTag(char)
 		if tag_closed && first_tag == 'mx:Panel'
 			return repeat("\<Del>", 3) . "\<CR></mx:Panel>\<Up>\<End>>\<Left> "
 		endif
-	endif
-	if a:char == '>'
+	elseif a:char == '>'
+		if @g != ''
+			let ctag = GetExactWordBeforeCursor(1)
+			let body = @g
+			let @g=''
+			return '>' . body . '</' . ctag . '>'
+		endif
 		if GetCharUnder() == '>'
 			return "\<Right>"
 		elseif GetCharBefore(1) == '>' && (&ft == 'php' || &ft == 'html' || &ft == 'xml')
@@ -589,7 +594,8 @@ function! ExpandTag(char)
 		if cword !~ '>' && CountOccurances(sbefore1, '<') > CountOccurances(sbefore1, '>')
 			let cleft = repeat("\<Left>", len(cword) + 4)
 			let retval = ''
-			let close_tag = '></' . cword . '>' . cleft
+			let close_tag = '>' . @g . '</' . cword . '>' . cleft . (@g != '' ? "\<C-o>F>" : '')
+			let @g = ''
 			if cword == 'input' || cword == 'label' || cword == 'br' || cword == 'hr'
 				let retval .= ">\<Left>"
 			else
@@ -651,6 +657,8 @@ function! Enclose(mode, indent)
 endfunction
 vnoremap <silent> <M-{> >gv:<C-u>call Enclose('{', 1)<CR>
 vnoremap <silent> <M-/> :<C-u>call Enclose('/', 0)<CR>
+
+vnoremap <silent> <M-'> "gxi
 
 " NERDTree
 nnoremap <silent> <C-Q> :NERDTreeToggle<CR>
@@ -770,17 +778,12 @@ let g:template{'python'}{'fi'} = "def __init__(self):\<CR>\<Tab>pass\<Up>\<End>"
 let g:template{'python'}{'cl'} = "class ():\<CR>\<Tab>pass\<Up>\<End>" . repeat("\<Left>", 3)
 let g:template{'python'}{'p'} = 'pass'
 let g:template{'python'}{'s'} = 'self.'
+let g:template{'python'}{'t'} = g:template{'python'}{'s'}
 
 " JSP templates
 let g:template{'jsp'}{'inc'} = '<%@ include file="" %>' . repeat("\<Left>", 4)
 
-" XML templates
-let g:template{'xml'}{'txml'} = '<?xml version="1.0" encoding="utf-8"?>' . "\<CR>"
-let g:template{'xml'}{'tx'} = g:template{'xml'}{'txml'}
-
 " MXML templates
-let g:template{'xml'}{'tmxml'} = g:template{'xml'}{'txml'} . '<mx:Application xmlns:mx="http://www.adobe.com/2006/mxml">' . "\<CR></mx:Application>\<Up>\<End>\<CR>\<Tab>"
-let g:template{'xml'}{'tmx'} = g:template{'xml'}{'tmxml'}
 let g:template{'xml'}{'as'} = '<mx:Script source="" />' . repeat("\<Left>", 4)
 let g:template{'xml'}{'scr'} = "<mx:Script>\<CR>\<Tab><![CDATA[\<CR>]]>\<CR>\<BS></mx:Script>\<Up>\<Up>\<End>\<CR>\<Tab>"
 let g:template{'xml'}{'mx'} = '<mx: />' . repeat("\<Left>", 3) . "\<C-R>=CapitalizeNextLetter()\<CR>"
@@ -795,17 +798,19 @@ function! InsertReturn()
 	if getline('.') =~ '^\s*$'
 		return "return ;\<Left>"
 	else
-		return "return "
+		return "return"
 	endif
 endfunction
 let g:template{'_'}{'r'} = "\<C-R>=InsertReturn()\<CR>"
-
-" General HTML templates
-let g:template{'_'}{'thtml'} = '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">' . "\<CR><html>\<CR>\<Tab><head>\<CR>\<Tab><title></title>\<CR>" . '<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">' . "\<CR>\<BS></head>\<CR><body>\<CR></body>\<CR>\<BS></html>\<Up>\<Up>\<Up>\<Up>\<Up>\<End>\<Left>\<Left>\<Left>\<Left>\<Left>\<Left>\<Left>\<Left>"
-let g:template{'_'}{'tht'} = g:template{'_'}{'thtml'}
-
-let g:template{'_'}{'txhtml'} = '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">' . "\<CR><html>\<CR>\<Tab><head>\<CR>\<Tab><title></title>\<CR>" . '<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />' . "\<CR>\<BS></head>\<CR><body>\<CR></body>\<CR>\<BS></html>\<Up>\<Up>\<Up>\<Up>\<Up>\<End>\<Left>\<Left>\<Left>\<Left>\<Left>\<Left>\<Left>\<Left>"
-let g:template{'_'}{'thtt'} = g:template{'_'}{'txhtml'}
-
 let g:template{'_'}{'css'} = '<link rel="stylesheet" type="text/css" href="">' . repeat("\<Left>", 2)
 let g:template{'_'}{'js'} = '<script type="text/javascript" src=""></script>' . repeat("\<Left>", 11)
+
+" General file templates
+let g:template{'_'}{'thtml'} = '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">' . "\<CR><html>\<CR>\<Tab><head>\<CR>\<Tab><title></title>\<CR>" . '<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">' . "\<CR>\<BS></head>\<CR><body>\<CR></body>\<CR>\<BS></html>\<Up>\<Up>\<Up>\<Up>\<Up>\<End>\<Left>\<Left>\<Left>\<Left>\<Left>\<Left>\<Left>\<Left>"
+let g:template{'_'}{'tht'} = g:template{'_'}{'thtml'}
+let g:template{'_'}{'txml'} = '<?xml version="1.0" encoding="utf-8"?>' . "\<CR>"
+let g:template{'_'}{'tx'} = g:template{'_'}{'txml'}
+let g:template{'_'}{'txhtml'} = g:template{'_'}{'txml'} . '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">' . "\<CR>" . '<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">' . "\<CR>\<Tab><head>\<CR>\<Tab><title></title>\<CR>\<BS></head>\<CR><body>\<CR></body>\<CR>\<BS></html>\<Up>\<Up>\<Up>\<Up>\<End>\<Left>\<Left>\<Left>\<Left>\<Left>\<Left>\<Left>\<Left>"
+let g:template{'_'}{'thtt'} = g:template{'_'}{'txhtml'}
+let g:template{'_'}{'tmxml'} = g:template{'_'}{'txml'} . '<mx:Application xmlns:mx="http://www.adobe.com/2006/mxml">' . "\<CR></mx:Application>\<Up>\<End>\<CR>\<Tab>"
+let g:template{'_'}{'tmx'} = g:template{'_'}{'tmxml'}
