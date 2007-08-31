@@ -1,5 +1,5 @@
 " Author: Radu Dineiu <radu.dineiu@gmail.com>
-" Version: 0.8
+" Version: 0.9
 " URL: http://ld.yi.org/vim/aedit/aedit.vim
 " Changelog: http://ld.yi.org/vim/aedit/changelog.txt
 
@@ -191,6 +191,8 @@ vnoremap <silent> <S-Tab> <gv
 " Execute last command
 inoremap <M-:> <C-o>:echo ':' . @: \| execute @:<CR>
 nnoremap <M-:> :echo ':' . @: \| execute @:<CR>
+inoremap <M-!> <C-o>:!!<CR>
+nnoremap <M-!> :!!<CR>
 
 " Lines
 function! IsBlockStart(offset)
@@ -283,6 +285,28 @@ function! InsertBrace(mode)
 		if &ft == 'vim'
 			let end_word = 'end' . substitute(GetFirstWord(), 'else', '', '')
 			return "\<End>\<CR>" . end_word . "\<Up>\<End>\<CR>\<Tab>"
+		elseif InsideTag() && (&ft == 'xml' || &ft == 'html')
+			let tag = substitute(line, '^\s*<\(\S\+\)[ >].*$', '\1', '')
+			let result = "\<End>"
+			if next_line =~ '^\s*$'
+				let tag_line_offset = 2
+				let result .= "\<Down>\<End>"
+			else
+				let tag_line_offset = 1
+				let result .= "\<CR>\<Tab>"
+			endif
+			let add_closing_tag = 0
+			if (getline(line('.') + tag_line_offset) !~ '<\/' . tag)
+				let add_closing_tag = 1
+			endif
+			if add_closing_tag
+				let result .= "\<End>\<CR>"
+				if tag_line_offset == 1
+					let result .= "\<BS>"
+				endif
+				let result .= "</" . tag . ">\<Up>\<End>"
+			endif
+			return result
 		elseif &ft == 'python'
 			if next_line =~ '^\s*pass\s*$'
 				return "\<Down>\<End>\<C-w>"
@@ -533,11 +557,22 @@ function! ExpandTemplate(ignore_quote)
 endfunction
 inoremap <silent> <Space> <C-R>=ExpandTemplate(0)<CR>
 
+function! GetFirstTag()
+	return substitute(getline('.'), '^\s*<\(\S\+\)[ >].*$', '\1', '')
+endfunction
+
 function! ExpandTag(char)
+	if a:char == ' ' && &ft == 'xml'
+		let first_tag = GetFirstTag()
+		let tag_closed = match(getline('.'), '<' . first_tag . '[^>]*/>') > -1
+		if tag_closed && first_tag == 'mx:Panel'
+			return repeat("\<Del>", 3) . "\<CR></mx:Panel>\<Up>\<End>>\<Left> "
+		endif
+	endif
 	if a:char == '>'
 		if GetCharUnder() == '>'
 			return "\<Right>"
-		elseif GetCharBefore(1) == '>' && (&ft == 'php' || &ft == 'html')
+		elseif GetCharBefore(1) == '>' && (&ft == 'php' || &ft == 'html' || &ft == 'xml')
 			if &ft == 'php' && GetCharBefore(2) == '?'
 				return '>'
 			endif
@@ -548,7 +583,7 @@ function! ExpandTag(char)
 	if GetCharUnder() == '>'
 		return a:char
 	endif
-	if sbefore =~ '^.*<\w\+\S*$' && (&ft == 'php' || &ft == 'html')
+	if sbefore =~ '^.*<\w\+\S*$' && (&ft == 'php' || &ft == 'html' || &ft == 'xml')
 		let cword = GetExactWordBeforeCursor(1)
 		let sbefore1 = strpart(sbefore, 0, strlen(sbefore) - 1)
 		if cword !~ '>' && CountOccurances(sbefore1, '<') > CountOccurances(sbefore1, '>')
@@ -577,6 +612,7 @@ inoremap <silent> > <C-R>=ExpandTag('>')<CR>
 nnoremap <Down> gj
 nnoremap <Up> gk
 function! MoveCursor(cmd)
+	call UnbindCapitalizeNextLetterHandler() " if the cursor moves, unbind the capitalization handler
 	if a:cmd == 'down'
 		if pumvisible() | return "\<Down>" | endif
 		execute 'normal! gj'
@@ -596,8 +632,13 @@ function! Enclose(mode, indent)
 		let start = '{'
 		let end = '}'
 	elseif a:mode == '/'
-		let start = '/**'
-		let end = '/**/'
+		if &ft == 'xml' || &ft == 'html'
+			let start = '<!--'
+			let end = '-->'
+		else
+			let start = '/**'
+			let end = '/**/'
+		endif
 	endif
 	let extra = ''
 	if a:indent
@@ -628,6 +669,28 @@ function! InsertPHPBlock()
 		return "\<CR>{\<CR>}\<Up>\<CR>\<Tab>\<Up>\<Up>\<End>"
 	endif
 endfunction
+
+function! CapitalizeNextLetter()
+	let g:_cpl = 0
+	autocmd CursorMovedI * call CapitalizeNextLetterHandler()
+	return ''
+endfunction
+
+function! CapitalizeNextLetterHandler()
+	execute "normal! gUhl"
+	if g:_cpl == 1
+		call UnbindCapitalizeNextLetterHandler()
+	endif
+	let g:_cpl = 1
+endfunction
+
+function! UnbindCapitalizeNextLetterHandler()
+	autocmd! CursorMovedI *
+endfunction
+inoremap <silent> <Left> <C-o>:call UnbindCapitalizeNextLetterHandler()<CR><Left>
+inoremap <silent> <Right> <C-o>:call UnbindCapitalizeNextLetterHandler()<CR><Right>
+nnoremap <silent> <Left> :call UnbindCapitalizeNextLetterHandler()<CR><Left>
+nnoremap <silent> <Right> :call UnbindCapitalizeNextLetterHandler()<CR><Right>
 
 " PHP templates
 let g:template{'php'}{'cl'} = "class \<CR>{\<CR>}\<Up>\<CR>\<Tab>\<Up>\<Up>\<End>"
@@ -701,20 +764,41 @@ let g:template{'javascript'}{'v'} = "var "
 let g:template{'vim'}{'f'} = "function! ()\<CR>endfunction\<Up>\<End>\<Left>\<Left>"
 let g:template{'vim'}{'r'} = "return "
 
-" Python
+" Python templates
 let g:template{'python'}{'f'} = "def ():\<CR>\<Tab>pass\<Up>\<End>" . repeat("\<Left>", 3)
 let g:template{'python'}{'fi'} = "def __init__(self):\<CR>\<Tab>pass\<Up>\<End>" . repeat("\<Left>", 2)
 let g:template{'python'}{'cl'} = "class ():\<CR>\<Tab>pass\<Up>\<End>" . repeat("\<Left>", 3)
 let g:template{'python'}{'p'} = 'pass'
 let g:template{'python'}{'s'} = 'self.'
 
-" JSP
+" JSP templates
 let g:template{'jsp'}{'inc'} = '<%@ include file="" %>' . repeat("\<Left>", 4)
+
+" XML templates
+let g:template{'xml'}{'txml'} = '<?xml version="1.0" encoding="utf-8"?>' . "\<CR>"
+let g:template{'xml'}{'tx'} = g:template{'xml'}{'txml'}
+
+" MXML templates
+let g:template{'xml'}{'tmxml'} = g:template{'xml'}{'txml'} . '<mx:Application xmlns:mx="http://www.adobe.com/2006/mxml">' . "\<CR></mx:Application>\<Up>\<End>\<CR>\<Tab>"
+let g:template{'xml'}{'tmx'} = g:template{'xml'}{'tmxml'}
+let g:template{'xml'}{'as'} = '<mx:Script source="" />' . repeat("\<Left>", 4)
+let g:template{'xml'}{'scr'} = "<mx:Script>\<CR>\<Tab><![CDATA[\<CR>]]>\<CR>\<BS></mx:Script>\<Up>\<Up>\<End>\<CR>\<Tab>"
+let g:template{'xml'}{'mx'} = '<mx: />' . repeat("\<Left>", 3) . "\<C-R>=CapitalizeNextLetter()\<CR>"
+let g:template{'xml'}{'mxp'} = "<mx:Panel>\<CR>\<Tab>\<CR>\<BS></mx:Panel>\<Up>\<Up>\<End>\<Left> "
+let g:template{'xml'}{'st'} = "<mx:Style>\<CR></mx:Style>\<Up>\<End>\<CR>\<Tab>"
+let g:template{'xml'}{'css'} = '<mx:Style source="" />' . repeat("\<Left>", 4)
 
 " General templates
 let g:template{'_'}{'f'} = "function ()\<CR>{\<CR>}\<Up>\<CR>\<Tab>\<Up>\<Up>\<End>\<Left>\<Left>"
 let g:template{'_'}{'ff'} = "function () {\<CR>}\<Up>\<End>" . repeat("\<Left>", 4)
-let g:template{'_'}{'r'} = "return ;\<Left>"
+function! InsertReturn()
+	if getline('.') =~ '^\s*$'
+		return "return ;\<Left>"
+	else
+		return "return "
+	endif
+endfunction
+let g:template{'_'}{'r'} = "\<C-R>=InsertReturn()\<CR>"
 
 " General HTML templates
 let g:template{'_'}{'thtml'} = '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">' . "\<CR><html>\<CR>\<Tab><head>\<CR>\<Tab><title></title>\<CR>" . '<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">' . "\<CR>\<BS></head>\<CR><body>\<CR></body>\<CR>\<BS></html>\<Up>\<Up>\<Up>\<Up>\<Up>\<End>\<Left>\<Left>\<Left>\<Left>\<Left>\<Left>\<Left>\<Left>"
